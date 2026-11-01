@@ -1,12 +1,12 @@
 # Fire Emblem: Fortune's Weave — Sound Data-Mining Scripts
 
 Tools for extracting the **OST (music)** and **sound effects** from a
-*Fire Emblem: Fortune's Weave* `romfs` dump — the kind created by running the
+_Fire Emblem: Fortune's Weave_ `romfs` dump — the kind created by running the
 userland **Smile Basic 4** exploit on a Nintendo Switch 2.
 
 ## Usage (how to get your files out)
 
-You only need two steps per type of audio. No technical background required:
+You only need two steps per type of audio.
 
 1. **Get Python** (skip if you already have it): download and install it from
    [python.org](https://www.python.org/downloads/). During installation, tick
@@ -40,13 +40,13 @@ runs; any failures are also written to a log file next to the output.
 
 ## What's in this repo
 
-| File | Purpose |
-|---|---|
-| `convert_all_bfsar.py` | Batch entry point: decodes every top-level `.bfsar` in a Sound directory |
-| `decode_bfsar.py` | BFSAR / FWAV block parser and per-block WAV writer |
-| `gcadpcm.py` | Nintendo 4-bit GC/DSP ADPCM decoder (Numba fast path, pure-Python fallback) |
-| `convert_all_OST.py` | Batch entry point: converts every top-level `.opus` in a stream directory |
-| `nop2ogg.py` | NxOpus container parser and Ogg page writer |
+| File                   | Purpose                                                                     |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `convert_all_bfsar.py` | Batch entry point: decodes every top-level `.bfsar` in a Sound directory    |
+| `decode_bfsar.py`      | BFSAR / FWAV block parser and per-block WAV writer                          |
+| `gcadpcm.py`           | Nintendo 4-bit GC/DSP ADPCM decoder (Numba fast path, pure-Python fallback) |
+| `convert_all_OST.py`   | Batch entry point: converts every top-level `.opus` in a stream directory   |
+| `nop2ogg.py`           | NxOpus container parser and Ogg page writer                                 |
 
 Technical notes: BFSAR archives are parsed for "FWAV" (AAL BFWAV) blocks,
 handling both plain PCM and 4-bit GC/DSP ADPCM; `.opus` (NxOpus/NOP) files are
