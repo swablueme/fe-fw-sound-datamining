@@ -10,45 +10,46 @@ import traceback
 
 import decode_bfsar
 
-#Replace FILE_PATH string value with the PATH TO YOUR GAME SOUND eg C:\game\romfs\Sound
+# Replace FILE_PATH string value with the PATH TO YOUR GAME SOUND eg C:\game\romfs\Sound
 BASE = r"FILE_PATH"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 os.makedirs(OUT, exist_ok=True)
 
 
 def main():
-    files = sorted(glob.glob(os.path.join(BASE, "*.bfsar")))
+    bfsar_files = sorted(glob.glob(os.path.join(BASE, "*.bfsar")))
     summary = []
-    for f in files:
-        stem = os.path.splitext(os.path.basename(f))[0]
-        fdir = os.path.join(OUT, stem)
-        os.makedirs(fdir, exist_ok=True)
-        data = open(f, "rb").read()
-        offs = decode_bfsar.find_fwav(data)
+    for bfsar_path in bfsar_files:
+        stem = os.path.splitext(os.path.basename(bfsar_path))[0]
+        output_dir = os.path.join(OUT, stem)
+        os.makedirs(output_dir, exist_ok=True)
+        raw_data = open(bfsar_path, "rb").read()
+        fwav_offsets = decode_bfsar.find_fwav(raw_data)
         ok = 0
         fail = 0
-        print("\n##### %s  (%d bytes, %d FWAV blocks)" % (stem, len(data), len(offs)))
-        for i, off in enumerate(offs):
-            name = "%s_%03d" % (stem, i)
+        print("\n##### %s  (%d bytes, %d FWAV blocks)"
+              % (stem, len(raw_data), len(fwav_offsets)))
+        for entry_index, fwav_offset in enumerate(fwav_offsets):
+            name = "%s_%03d" % (stem, entry_index)
             try:
-                decode_bfsar.read_fwav(data, off, fdir, name)
+                decode_bfsar.read_fwav(raw_data, fwav_offset, output_dir, name)
                 ok += 1
-            except Exception as e:
+            except Exception as error:
                 fail += 1
-                print("  !! %s @0x%X FAILED: %r" % (name, off, e))
+                print("  !! %s @0x%X FAILED: %r" % (name, fwav_offset, error))
                 traceback.print_exc()
-        summary.append((stem, len(data), len(offs), ok, fail))
+        summary.append((stem, len(raw_data), len(fwav_offsets), ok, fail))
 
     print("\n\n================ SUMMARY ================")
     print("%-24s %12s %8s %6s %6s" % ("bfsar", "bytes", "fwav", "ok", "fail"))
-    to = to_ok = to_f = 0
-    for stem, size, nf, ok, fail in summary:
-        print("%-24s %12d %8d %6d %6d" % (stem, size, nf, ok, fail))
-        to += nf
-        to_ok += ok
-        to_f += fail
+    total_fwav = total_ok = total_fail = 0
+    for stem, size, fwav_count, ok, fail in summary:
+        print("%-24s %12d %8d %6d %6d" % (stem, size, fwav_count, ok, fail))
+        total_fwav += fwav_count
+        total_ok += ok
+        total_fail += fail
     print("-" * 60)
-    print("total fwav=%d ok=%d fail=%d" % (to, to_ok, to_f))
+    print("total fwav=%d ok=%d fail=%d" % (total_fwav, total_ok, total_fail))
     print("output dir:", OUT)
 
 

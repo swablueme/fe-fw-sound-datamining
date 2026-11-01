@@ -44,99 +44,142 @@ import struct
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# --- FWAV block IDs ----------------------------------------------------------
+BLOCK_ID_INFO = 0x7000          # audio parameter block
+BLOCK_ID_DATA = 0x7001          # ADPCM payload block
+PER_CHANNEL_INFO_ID = 0x7100    # ID field of each per-channel info reference
+PER_CHANNEL_DATA_REF_ID = 0x1F00  # reference to the channel's ADPCM data
+PER_CHANNEL_DSP_REF_ID = 0x0300  # reference to the channel's DSP ADPCM info
+SAMPLE_FORMAT_ADPCM = 2         # INFO block +0x08: 2 == 4-bit GC/DSP ADPCM
+MAX_PLAUSIBLE_TRIPLET_COUNT = 16  # sanity cap when scanning for FWAV blocks
 
-def u16(data, o): return struct.unpack_from("<H", data, o)[0]
-def u32(data, o): return struct.unpack_from("<I", data, o)[0]
+
+def read_u16(data, offset):
+    """Read a little-endian unsigned 16-bit int at `offset`."""
+    return struct.unpack_from("<H", data, offset)[0]
 
 
-def i16(data, o):
-    v = u16(data, o)
-    return v - 0x10000 if v >= 0x8000 else v
+def read_u32(data, offset):
+    """Read a little-endian unsigned 32-bit int at `offset`."""
+    return struct.unpack_from("<I", data, offset)[0]
 
 
-def read_fwav(data, base, outdir, name):
-    assert data[base:base + 4] == b"FWAV", hex(base)
-    ntrip = u32(data, base + 0x10)
-    off = base + 0x14
-    blocks = {}
-    for _ in range(ntrip):
-        tid, toff, tsz = u32(data, off), u32(data, off + 4), u32(data, off + 8)
-        blocks[tid] = (base + toff, tsz)
-        off += 12
+def read_i16(data, offset):
+    """Read a little-endian signed 16-bit int at `offset`."""
+    return struct.unpack_from("<h", data, offset)[0]
 
-    info, _ = blocks[0x7000]
-    dat, _ = blocks[0x7001]
-    assert data[info:info + 4] == b"INFO" and data[dat:dat + 4] == b"DATA"
 
-    fmt, looped = data[info + 0x08], data[info + 0x09]
-    rate = u32(data, info + 0x0C)
-    total = u32(data, info + 0x14)
-    nch = u32(data, info + 0x1C)
-    assert fmt == 2, "expected ADPCM, got fmt=%d" % fmt
+def read_fwav(data, fwav_offset, output_directory, base_name):
+    """Decode one FWAV block and write its WAV file. Returns the written path."""
+    assert data[fwav_offset:fwav_offset + 4] == b"FWAV", hex(fwav_offset)
 
-    payload = data[dat + 8: dat + 8 + (u32(data, dat + 4))]
+    # Triplet table: each entry is (u32 id, u32 offset, u32 size),
+    # offsets relative to the FWAV block base
+    triplet_count = read_u32(data, fwav_offset + 0x10)
+    triplet_position = fwav_offset + 0x14
+    block_offsets = {}
+    for _ in range(triplet_count):
+        block_id = read_u32(data, triplet_position)
+        block_offset = read_u32(data, triplet_position + 4)
+        block_offsets[block_id] = fwav_offset + block_offset
+        triplet_position += 12
 
-    # per-channel info references, table at +0x20, values relative to 0x1C field
-    refbase = info + 0x1C
-    pcm = []
-    print("== %s @0x%X  rate=%d nch=%d total=%d fmt=%d looped=%d =="
-          % (name, base, rate, nch, total, fmt, looped))
-    for c in range(nch):
-        pcref = info + 0x20 + 8 * c
-        assert u32(data, pcref) == 0x7100, hex(pcref)
-        pinfo = refbase + u32(data, pcref + 4)
-        assert u32(data, pinfo) == 0x1F00, hex(pinfo)
-        data_off = u32(data, pinfo + 4)          # rel. to DATA body
-        assert u32(data, pinfo + 8) == 0x0300, hex(pinfo + 8)
-        dsp = pinfo + u32(data, pinfo + 12)  # absolute: DSP ADPCM info block
-        coefs = [i16(data, dsp + 2 * i) for i in range(16)]
-        hdr = u16(data, dsp + 0x20)
-        h1, h2 = i16(data, dsp + 0x22), i16(data, dsp + 0x24)
+    info_offset = block_offsets[BLOCK_ID_INFO]
+    data_block_offset = block_offsets[BLOCK_ID_DATA]
+    assert data[info_offset:info_offset + 4] == b"INFO", hex(info_offset)
+    assert data[data_block_offset:data_block_offset + 4] == b"DATA", hex(data_block_offset)
+
+    sample_format = data[info_offset + 0x08]
+    is_looped = data[info_offset + 0x09]
+    sample_rate = read_u32(data, info_offset + 0x0C)
+    total_samples = read_u32(data, info_offset + 0x14)
+    channel_count = read_u32(data, info_offset + 0x1C)
+    assert sample_format == SAMPLE_FORMAT_ADPCM, \
+        "expected ADPCM, got fmt=%d" % sample_format
+
+    data_block_size = read_u32(data, data_block_offset + 4)
+    adpcm_payload = data[data_block_offset + 8: data_block_offset + 8 + data_block_size]
+
+    # Per-channel info references sit at +0x20, 8 bytes each; their values are
+    # relative to the channel_count field at +0x1C, not the block start
+    channel_ref_base = info_offset + 0x1C
+    pcm_channels = []
+    print("== %s @0x%X  rate=%d channels=%d total=%d fmt=%d looped=%d =="
+          % (base_name, fwav_offset, sample_rate, channel_count,
+             total_samples, sample_format, is_looped))
+
+    for channel_index in range(channel_count):
+        channel_ref_offset = info_offset + 0x20 + 8 * channel_index
+        assert read_u32(data, channel_ref_offset) == PER_CHANNEL_INFO_ID, \
+            hex(channel_ref_offset)
+        channel_info_offset = channel_ref_base + read_u32(data, channel_ref_offset + 4)
+        assert read_u32(data, channel_info_offset) == PER_CHANNEL_DATA_REF_ID, \
+            hex(channel_info_offset)
+        channel_data_offset = read_u32(data, channel_info_offset + 4)  # rel. to DATA body
+        assert read_u32(data, channel_info_offset + 8) == PER_CHANNEL_DSP_REF_ID, \
+            hex(channel_info_offset + 8)
+        dsp_info_offset = channel_info_offset + read_u32(data, channel_info_offset + 12)
+        dsp_coefficients = [
+            read_i16(data, dsp_info_offset + 2 * i) for i in range(16)]
+        context_header = read_u16(data, dsp_info_offset + 0x20)
+        context_history_1 = read_i16(data, dsp_info_offset + 0x22)
+        context_history_2 = read_i16(data, dsp_info_offset + 0x24)
         print("  ch%d: data@payload+%#06X coefs[0..2]=%s ctx_hdr=%#04X hist=(%d,%d)"
-              % (c, data_off, coefs[:3], hdr, h1, h2))
+              % (channel_index, channel_data_offset, dsp_coefficients[:3],
+                 context_header, context_history_1, context_history_2))
 
-        # size of this channel's data = next channel's data offset (or payload end)
-        if c + 1 < nch:
-            pn = info + 0x20 + 8 * (c + 1)
-            pinfo_n = refbase + u32(data, pn + 4)
-            next_off = u32(data, pinfo_n + 4)
-            chunk = payload[data_off:next_off]
+        # Size of this channel's data = next channel's data offset (or payload end)
+        if channel_index + 1 < channel_count:
+            next_channel_ref = info_offset + 0x20 + 8 * (channel_index + 1)
+            next_channel_info = channel_ref_base + read_u32(data, next_channel_ref + 4)
+            next_channel_data_offset = read_u32(data, next_channel_info + 4)
+            channel_chunk = adpcm_payload[channel_data_offset:next_channel_data_offset]
         else:
-            # last channel: take until end of payload (drop trailing padding)
-            frames = (len(payload) - data_off) // 8
-            chunk = payload[data_off:data_off + frames * 8]
-        if len(chunk) % 8:
-            chunk = chunk[:len(chunk) - len(chunk) % 8]
-            print("  ch%d: WARNING truncated %d bytes" % (c, len(chunk)))
+            # Last channel: take until end of payload (drop trailing padding)
+            full_frame_count = (len(adpcm_payload) - channel_data_offset) // 8
+            channel_chunk = adpcm_payload[
+                channel_data_offset:channel_data_offset + full_frame_count * 8]
+        if len(channel_chunk) % 8:
+            channel_chunk = channel_chunk[:len(channel_chunk) - len(channel_chunk) % 8]
+            print("  ch%d: WARNING truncated %d bytes" % (channel_index, len(channel_chunk)))
 
-        p = decode(chunk, coefs, None, h1, h2)
-        if not isinstance(p, np.ndarray):
-            p = np.asarray(p, dtype=np.int16)
-        pcm.append(p)
-        n = len(p)
-        nz = int(np.count_nonzero(p))
-        rms = float(np.sqrt(np.mean(p.astype(np.float64) ** 2))) if n else 0.0
+        decoded_samples = decode(
+            channel_chunk, dsp_coefficients, None,
+            context_history_1, context_history_2)
+        if not isinstance(decoded_samples, np.ndarray):
+            decoded_samples = np.asarray(decoded_samples, dtype=np.int16)
+        pcm_channels.append(decoded_samples)
+        sample_count = len(decoded_samples)
+        non_zero_count = int(np.count_nonzero(decoded_samples))
+        rms = float(np.sqrt(np.mean(decoded_samples.astype(np.float64) ** 2))) \
+            if sample_count else 0.0
         print("  ch%d: %d samples (%.3f s)  min=%d max=%d rms=%.1f nonzero=%d"
-              % (c, n, n / rate if rate else 0, int(p.min()), int(p.max()), rms, nz))
+              % (channel_index, sample_count,
+                 sample_count / sample_rate if sample_rate else 0,
+                 int(decoded_samples.min()), int(decoded_samples.max()),
+                 rms, non_zero_count))
 
-    # pad shorter channels to the longest
-    nmax = max(len(p) for p in pcm)
-    pcm = [np.pad(p, (0, nmax - len(p))) if len(p) < nmax else p for p in pcm]
+    # Pad shorter channels to the longest so the WAV interleaves evenly
+    max_channel_length = max(len(samples) for samples in pcm_channels)
+    padded_channels = [
+        np.pad(samples, (0, max_channel_length - len(samples)))
+        if len(samples) < max_channel_length else samples
+        for samples in pcm_channels]
 
-    path = os.path.join(outdir, name + ".wav")
-    to_wav16(pcm, rate, path)
-    print("  -> %s" % path)
-    return path
+    output_path = os.path.join(output_directory, base_name + ".wav")
+    to_wav16(padded_channels, sample_rate, output_path)
+    print("  -> %s" % output_path)
+    return output_path
 
 
 def find_fwav(data, start=0):
-    idxs = []
-    o = data.find(b"FWAV", start)
-    while o != -1:
-        # sanity: u32 total plausible
-        ntrip = u32(data, o + 0x10)
-        if 1 <= ntrip <= 16:
-            idxs.append(o)
-        o = data.find(b"FWAV", o + 4)
-    return idxs
-
+    """Find the offsets of all FWAV blocks in `data` (sanity-checked)."""
+    fwav_offsets = []
+    search_position = data.find(b"FWAV", start)
+    while search_position != -1:
+        # Sanity: the triplet count at +0x10 must be plausible
+        triplet_count = read_u32(data, search_position + 0x10)
+        if 1 <= triplet_count <= MAX_PLAUSIBLE_TRIPLET_COUNT:
+            fwav_offsets.append(search_position)
+        search_position = data.find(b"FWAV", search_position + 4)
+    return fwav_offsets
