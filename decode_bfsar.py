@@ -3,7 +3,13 @@
 Decoder for Nintendo Switch 2 "FWAV" (AAL BFWAV, versions 0x10100/0x10200)
 GC/DSP ADPCM sound assets inside .bfsar archives.
 
-Reference: https://nintendo-formats.com/libs/nw/bfwav.html
+References:
+  https://nintendo-formats.com/libs/nw/bfwav.html
+  https://nintendo-formats.com/libs/nw/bfsar.html
+  https://gota7.github.io/Citric-Composer/specs/common.html
+  https://gota7.github.io/Citric-Composer/specs/binaryWav.html
+  https://github.com/three-houses-research-team/Throne-of-Knowledge/wiki/Editing-KTSL2ASBIN-files
+    (useful information on what the structure of pcm files might look like)
 Codec: 4-bit GC/DSP ADPCM, 8-byte frame = 14 samples, per-channel coefs table.
 
 Layout:
