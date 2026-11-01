@@ -1,14 +1,44 @@
-# Switch 2 Sound Conversion Scripts
+# Fire Emblem: Fortune's Weave — Sound Data-Mining Scripts
 
-Standalone Python tools for decoding Nintendo Switch 2 sound assets:
+Tools for extracting the **OST (music)** and **sound effects** from a
+*Fire Emblem: Fortune's Weave* `romfs` dump — the kind created by running the
+userland **Smile Basic 4** exploit on a Nintendo Switch 2.
 
-- **BFSAR → WAV**: decodes `.bfsar` archives containing "FWAV" (AAL BFWAV) blocks,
-  handling both plain PCM and 4-bit GC/DSP ADPCM, with loop info where present.
-- **NxOpus → Ogg**: repacks Nintendo's `NOP` `.opus` container (standard and
-  SE/multistream variants) into standard Ogg Opus. No transcoding — the raw Opus
-  packets are passed through unchanged.
+## Usage (how to get your files out)
 
-## Files
+You only need two steps per type of audio. No technical background required:
+
+1. **Get Python** (skip if you already have it): download and install it from
+   [python.org](https://www.python.org/downloads/). During installation, tick
+   the box that says "Add Python to PATH".
+2. **Point the scripts at your dump**: each converter has a line near the top
+   with a placeholder you must replace with your own folder address:
+   - `convert_all_bfsar.py` → open it in any text editor and replace `FILE_PATH`
+     with the address of your `romfs\Sound` folder, e.g.
+     `C:\Users\yourname\Downloads\romfs\Sound`
+     (in the text file, use forward slashes or double the backslashes, e.g.
+     `C:\game\romfs\Sound`).
+   - `convert_all_OST.py` → replace `FILE_PATH` with your `romfs\Sound\stream`
+     folder and `OUTPUT_PATH` with wherever you want the `.ogg` music files.
+3. **Run the script**: in the folder where the scripts live, open a terminal
+   (right-click the folder → "Open in Terminal" / "Open in PowerShell") and type:
+   ```bat
+   python convert_all_bfsar.py
+   ```
+   and/or
+   ```bat
+   python convert_all_OST.py
+   ```
+4. **Collect your audio**:
+   - Sound effects appear as `.wav` files in a new `out\` folder, one subfolder
+     per archive.
+   - Music appears as `.ogg` files in the output folder you chose (play them
+     with any modern player such as VLC).
+
+Progress and a final summary (counts of OK / failed files) are printed as it
+runs; any failures are also written to a log file next to the output.
+
+## What's in this repo
 
 | File | Purpose |
 |---|---|
@@ -18,18 +48,10 @@ Standalone Python tools for decoding Nintendo Switch 2 sound assets:
 | `convert_all_OST.py` | Batch entry point: converts every top-level `.opus` in a stream directory |
 | `nop2ogg.py` | NxOpus container parser and Ogg page writer |
 
-## Usage
-
-Each entry-point script contains `FILE_PATH` / `OUTPUT_PATH` placeholders —
-replace them with your own paths before running, e.g.:
-
-```bat
-python convert_all_bfsar.py
-python convert_all_OST.py
-```
-
-Output WAV files are written under `out\<archive name>\` and OGG files are
-written directly into the chosen output directory.
+Technical notes: BFSAR archives are parsed for "FWAV" (AAL BFWAV) blocks,
+handling both plain PCM and 4-bit GC/DSP ADPCM; `.opus` (NxOpus/NOP) files are
+repacked into standard Ogg Opus with **no transcoding** — the raw Opus packets
+are passed through unchanged.
 
 ## Verification
 
